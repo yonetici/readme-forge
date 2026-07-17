@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# README Forge 🔨
 
-## Getting Started
+**Build a GitHub profile README that doesn't rot.**
 
-First, run the development server:
+Most profile READMEs slowly fall apart: stats cards hit shared rate limits (HTTP 503), icons hotlinked
+from moving repos start 404ing, and Heroku-hosted badge services died back in 2022. README Forge
+generates profiles that stay healthy — and diagnoses existing ones that already broke.
+
+## Why another generator?
+
+| | Typical generators | README Forge |
+|---|---|---|
+| Skill icons | Hotlinked from `master` branches | Version-pinned via jsDelivr — can't 404 |
+| GitHub stats | Shared Vercel instance (chronically rate-limited) | Rendered *inside your repo* by GitHub Actions |
+| Existing broken profiles | Not their problem | 🩺 Link Doctor finds, explains, and fixes them |
+| When a service dies | Your profile shows broken images | Your profile doesn't notice |
+
+## Features
+
+- **🛠️ Builder** — form-based editor with live GitHub-style preview: basics, categorized skills,
+  social badges, and stats add-ons. Copy or download the result.
+- **📊 Durable stats** — instead of hotlinking `github-readme-stats.vercel.app`, the download includes
+  a `update-stats.yml` workflow that renders your stats to a committed SVG on a daily schedule using
+  your own repo's `GITHUB_TOKEN`. No shared instance, no rate limits, no dead services.
+- **🩺 Link Doctor** — point it at any GitHub username. It fetches the profile README, checks every
+  link and image (including soft-404s: URLs that return HTTP 200 but serve HTML where an image
+  should be), explains *why* each dead link died, and suggests working replacements.
+
+## Getting started
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Using the durable stats workflow
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Download your README from the Builder — you get `README.md` + `update-stats.yml`.
+2. In your profile repo (`<username>/<username>`), place the workflow at
+   `.github/workflows/update-stats.yml`.
+3. Run it once from the **Actions** tab (it also runs daily at 03:00 UTC).
+4. `github-metrics.svg` is committed to your repo and referenced by the README — from that point on,
+   your stats render even if every third-party stats service on the internet disappears.
 
-## Learn More
+## Roadmap
 
-To learn more about Next.js, take a look at the following resources:
+- [ ] One-click "fix my README" — Link Doctor outputs a fully repaired README, not just suggestions
+- [ ] Icon vendoring — commit selected SVGs to an `assets/` folder for zero external requests
+- [ ] Theme gallery and more layout templates
+- [ ] Self-hosted SVG stat cards (serverless) as an alternative to the Actions workflow
+- [ ] Deploy to GitHub Pages / Vercel
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Tech stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Next.js 16 · TypeScript · Tailwind CSS 4 · react-markdown
 
-## Deploy on Vercel
+## Acknowledgements
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Inspired by [rahuldkjain/github-profile-readme-generator](https://github.com/rahuldkjain/github-profile-readme-generator)
+(Apache-2.0) — the tool that popularized profile READMEs. README Forge focuses on the durability
+problems that emerged in the years since: dead Herokus, rate-limited shared instances, and moved icons.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## License
+
+MIT
