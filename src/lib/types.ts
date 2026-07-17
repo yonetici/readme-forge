@@ -15,16 +15,17 @@ export interface ProfileData {
   addons: AddonConfig;
 }
 
+import type { PanelId } from "./statsCards";
+
+/** durable = fetch cards once/day and commit them (survives outages, no
+ *  per-view rate limits); live = hotlink the shared services directly. */
+export type StatsEngine = "durable" | "live";
+
 export interface AddonConfig {
   visitorBadge: boolean;
-  githubStats: boolean;
-  streak: boolean;
-  topLangs: boolean;
-  trophies: boolean;
-  /** Emit a GitHub Actions workflow that renders stats to committed SVGs
-   *  instead of hotlinking shared third-party services. */
-  staticStatsWorkflow: boolean;
+  statsEngine: StatsEngine;
   statsTheme: string;
+  panels: PanelId[];
 }
 
 export interface Skill {
@@ -75,11 +76,8 @@ export const DEFAULT_PROFILE: ProfileData = {
   socials: {},
   addons: {
     visitorBadge: true,
-    githubStats: true,
-    streak: true,
-    topLangs: true,
-    trophies: false,
-    staticStatsWorkflow: true,
+    statsEngine: "durable",
     statsTheme: "tokyonight",
+    panels: ["stats", "topLangs", "streak"],
   },
 };

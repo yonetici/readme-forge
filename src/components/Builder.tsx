@@ -4,10 +4,12 @@ import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
-import { DEFAULT_PROFILE, type ProfileData } from "@/lib/types";
+import { DEFAULT_PROFILE, type ProfileData, type StatsEngine } from "@/lib/types";
 import { generateReadme, generateStatsWorkflow } from "@/lib/generator";
 import { SKILL_CATEGORIES } from "@/data/skills";
 import { SOCIAL_PLATFORMS } from "@/data/socials";
+import { STATS_THEMES } from "@/data/statsThemes";
+import { STATS_PANELS, type PanelId } from "@/lib/statsCards";
 import { Doctor } from "./Doctor";
 
 type Tab = "builder" | "doctor";
@@ -20,10 +22,29 @@ export function Builder() {
   const [copied, setCopied] = useState(false);
 
   const markdown = useMemo(() => generateReadme(profile), [profile]);
+  const previewMarkdown = useMemo(() => generateReadme(profile, { forPreview: true }), [profile]);
   const workflow = useMemo(() => generateStatsWorkflow(profile), [profile]);
+  const durable = profile.addons.statsEngine === "durable";
+  // The workflow tab only exists in durable mode; fall back if the user
+  // switched engines while it was selected.
+  const activeTab = outputTab === "workflow" && !durable ? "preview" : outputTab;
 
   const set = <K extends keyof ProfileData>(key: K, value: ProfileData[K]) =>
     setProfile((p) => ({ ...p, [key]: value }));
+
+  const setAddon = <K extends keyof ProfileData["addons"]>(key: K, value: ProfileData["addons"][K]) =>
+    setProfile((p) => ({ ...p, addons: { ...p.addons, [key]: value } }));
+
+  const togglePanel = (id: PanelId) =>
+    setProfile((p) => ({
+      ...p,
+      addons: {
+        ...p.addons,
+        panels: p.addons.panels.includes(id)
+          ? p.addons.panels.filter((x) => x !== id)
+          : [...p.addons.panels, id],
+      },
+    }));
 
   const toggleSkill = (id: string) =>
     setProfile((p) => ({
@@ -128,22 +149,63 @@ export function Builder() {
               </div>
             </Section>
 
-            <Section title="Stats & add-ons">
-              <Toggle
-                label="Durable stats (recommended)"
-                hint="Ships a GitHub Actions workflow that renders stats to a committed SVG — immune to rate limits and dead services"
-                checked={profile.addons.staticStatsWorkflow}
-                onChange={(v) => set("addons", { ...profile.addons, staticStatsWorkflow: v })}
-              />
-              <Toggle label="Visitor count badge" checked={profile.addons.visitorBadge} onChange={(v) => set("addons", { ...profile.addons, visitorBadge: v })} />
-              {!profile.addons.staticStatsWorkflow && (
-                <>
-                  <Toggle label="GitHub stats card" checked={profile.addons.githubStats} onChange={(v) => set("addons", { ...profile.addons, githubStats: v })} />
-                  <Toggle label="Top languages card" checked={profile.addons.topLangs} onChange={(v) => set("addons", { ...profile.addons, topLangs: v })} />
-                  <Toggle label="Streak card" checked={profile.addons.streak} onChange={(v) => set("addons", { ...profile.addons, streak: v })} />
-                  <Toggle label="Trophies" checked={profile.addons.trophies} onChange={(v) => set("addons", { ...profile.addons, trophies: v })} />
-                </>
-              )}
+            <Section title="GitHub Stats" hint="Pick the panels, a theme, and how they’re delivered. The preview shows live cards; the download wires up whichever delivery you choose.">
+              <div>
+                <p className="mb-1.5 text-xs text-zinc-400">Delivery</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <EngineOption
+                    active={durable}
+                    onClick={() => setAddon("statsEngine", "durable" as StatsEngine)}
+                    title="Durable"
+                    badge="recommended"
+                    desc="Cards fetched daily & committed to your repo. Survives outages, no per-view rate limits."
+                  />
+                  <EngineOption
+                    active={!durable}
+                    onClick={() => setAddon("statsEngine", "live" as StatsEngine)}
+                    title="Live"
+                    desc="Hotlink the shared services directly. Instant, but can rate-limit or 503."
+                  />
+                </div>
+              </div>
+
+              <label className="block">
+                <span className="mb-1 block text-xs text-zinc-400">Theme</span>
+                <select
+                  value={profile.addons.statsTheme}
+                  onChange={(e) => setAddon("statsTheme", e.target.value)}
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                >
+                  {STATS_THEMES.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div>
+                <p className="mb-2 text-xs text-zinc-400">Panels</p>
+                <div className="space-y-2">
+                  {STATS_PANELS.map((panel) => (
+                    <Toggle
+                      key={panel.id}
+                      label={panel.label}
+                      hint={panel.hint}
+                      checked={profile.addons.panels.includes(panel.id)}
+                      onChange={() => togglePanel(panel.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="border-t border-zinc-800 pt-3">
+                <Toggle
+                  label="Visitor count badge"
+                  checked={profile.addons.visitorBadge}
+                  onChange={(v) => setAddon("visitorBadge", v)}
+                />
+              </div>
             </Section>
           </div>
 
@@ -152,16 +214,16 @@ export function Builder() {
             <div className="rounded-xl border border-zinc-800 bg-zinc-950">
               <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
                 <div className="flex gap-1">
-                  <OutputTabButton active={outputTab === "preview"} onClick={() => setOutputTab("preview")}>Preview</OutputTabButton>
-                  <OutputTabButton active={outputTab === "markdown"} onClick={() => setOutputTab("markdown")}>Markdown</OutputTabButton>
-                  {profile.addons.staticStatsWorkflow && (
-                    <OutputTabButton active={outputTab === "workflow"} onClick={() => setOutputTab("workflow")}>Workflow</OutputTabButton>
+                  <OutputTabButton active={activeTab === "preview"} onClick={() => setOutputTab("preview")}>Preview</OutputTabButton>
+                  <OutputTabButton active={activeTab === "markdown"} onClick={() => setOutputTab("markdown")}>Markdown</OutputTabButton>
+                  {durable && (
+                    <OutputTabButton active={activeTab === "workflow"} onClick={() => setOutputTab("workflow")}>Workflow</OutputTabButton>
                   )}
                 </div>
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => copy(outputTab === "workflow" ? workflow : markdown)}
+                    onClick={() => copy(activeTab === "workflow" ? workflow : markdown)}
                     className="rounded-md bg-zinc-800 px-3 py-1 text-xs text-zinc-200 hover:bg-zinc-700"
                   >
                     {copied ? "Copied ✓" : "Copy"}
@@ -170,7 +232,7 @@ export function Builder() {
                     type="button"
                     onClick={() => {
                       download("README.md", markdown);
-                      if (profile.addons.staticStatsWorkflow) download("update-stats.yml", workflow);
+                      if (durable) download("update-stats.yml", workflow);
                     }}
                     className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500"
                   >
@@ -179,47 +241,92 @@ export function Builder() {
                 </div>
               </div>
               <div className="max-h-[80vh] overflow-auto p-4">
-                {outputTab === "preview" && (
+                {activeTab === "preview" && (
                   <div className="readme-preview">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeRaw]}
                       urlTransform={(url) => url}
                       components={{
-                        img: (props) =>
-                          props.src?.toString().startsWith("./") ? (
-                            <span className="my-2 block rounded-lg border border-dashed border-zinc-600 bg-zinc-900 px-4 py-6 text-center text-xs text-zinc-400">
-                              📊 <code>{props.src.toString()}</code> — rendered inside your repo by the included
-                              Actions workflow after its first run
-                            </span>
-                          ) : (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img {...props} alt={props.alt ?? ""} />
-                          ),
+                        img: (props) => <PreviewImg src={props.src?.toString() ?? ""} alt={props.alt ?? ""} width={props.width} height={props.height} />,
                       }}
                     >
-                      {markdown}
+                      {previewMarkdown}
                     </ReactMarkdown>
                   </div>
                 )}
-                {outputTab === "markdown" && (
+                {activeTab === "markdown" && (
                   <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-zinc-300">{markdown}</pre>
                 )}
-                {outputTab === "workflow" && (
+                {activeTab === "workflow" && (
                   <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-zinc-300">{workflow}</pre>
                 )}
               </div>
             </div>
-            {profile.addons.staticStatsWorkflow && (
+            {durable ? (
               <p className="mt-2 text-xs text-zinc-500">
                 Download gives you <code>README.md</code> + <code>update-stats.yml</code>. Put the workflow at{" "}
-                <code>.github/workflows/update-stats.yml</code> in your profile repo and run it once from the Actions tab.
+                <code>.github/workflows/update-stats.yml</code>, run it once from the Actions tab to seed{" "}
+                <code>./assets</code>, and your cards refresh daily. The preview shows the live cards for reference.
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-zinc-500">
+                Live mode hotlinks the shared services on every view — quick to set up, but they can rate-limit or
+                go down. Switch to <strong>Durable</strong> to commit the cards to your repo instead.
               </p>
             )}
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+function PreviewImg({ src, alt, width, height }: { src: string; alt: string; width?: string | number; height?: string | number }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    // A card that won't load right now (e.g. the shared stats service is 503)
+    // — show why, which is exactly the case durable mode fixes.
+    return (
+      <span className="my-1 inline-block rounded-lg border border-dashed border-amber-700/60 bg-amber-950/20 px-3 py-4 text-center text-xs text-amber-300/80">
+        ⚠️ “{alt}” didn’t load — the live service may be rate-limited or down. Durable mode serves a committed
+        copy so this doesn’t reach your visitors.
+      </span>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt={alt} width={width} height={height} onError={() => setFailed(true)} />
+  );
+}
+
+function EngineOption({
+  active,
+  onClick,
+  title,
+  desc,
+  badge,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  desc: string;
+  badge?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg border p-3 text-left transition ${
+        active ? "border-emerald-500 bg-emerald-500/10" : "border-zinc-700 bg-zinc-900 hover:border-zinc-500"
+      }`}
+    >
+      <span className="flex items-center gap-1.5">
+        <span className={`text-sm font-medium ${active ? "text-emerald-300" : "text-zinc-200"}`}>{title}</span>
+        {badge && <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-300">{badge}</span>}
+      </span>
+      <span className="mt-1 block text-[11px] leading-snug text-zinc-500">{desc}</span>
+    </button>
   );
 }
 
