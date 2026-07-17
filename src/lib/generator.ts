@@ -99,6 +99,45 @@ export function hasNativePanels(p: ProfileData): boolean {
   );
 }
 
+export function generateSetupDoc(p: ProfileData): string {
+  const user = p.githubUsername.trim() || "YOUR_USERNAME";
+  const hasStats = user && p.addons.panels.length && p.addons.statsEngine === "durable";
+  return `# Setup
+
+This bundle is ready to commit to your GitHub **profile repository** — the one
+named exactly after your username (\`${user}/${user}\`). Unzip it at the root of
+that repo so the layout looks like:
+
+\`\`\`
+${user}/
+├── README.md
+${hasStats ? "├── .github/\n│   └── workflows/\n│       └── update-stats.yml\n" : ""}${hasStats && hasNativePanels(p) ? "├── scripts/\n│   └── generate-cards.mjs\n" : ""}${hasStats ? "└── assets/\n    └── *.svg   ← your stat cards (already rendered, so the README works now)\n" : ""}\`\`\`
+
+## Steps
+
+1. **Commit everything.** The \`assets/*.svg\` files are already rendered, so your
+   README displays correctly the moment you push — no waiting.
+${
+  hasStats
+    ? `2. **Enable the daily refresh.** Go to your repo's **Actions** tab, enable
+   workflows if prompted, open **"Update profile stats"**, and click **Run
+   workflow** once. After that it runs automatically every day at 03:00 UTC and
+   keeps your cards up to date${hasNativePanels(p) ? " — rendering Overall-stats and Top-languages itself, with no third-party service" : ""}.
+`
+    : ""
+}
+## Heads up
+
+Do **not** paste \`README.md\` into a repo without also committing the \`assets/\`
+folder — the stat cards use relative paths like \`./assets/github-stats.svg\`, so
+the images only resolve when those files are committed alongside the README.
+
+If you'd rather just copy-paste a README with no files to manage, re-generate it
+in **Live** mode instead — that version hotlinks the cards directly (at the cost
+of the rate limits and outages the durable mode avoids).
+`;
+}
+
 export function generateStatsWorkflow(p: ProfileData): string {
   const cards = resolveCards(p.githubUsername.trim() || "YOUR_USERNAME", p.addons.statsTheme, p.addons.panels);
   const nativeCards = cards.filter((c) => c.panel.native);

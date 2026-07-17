@@ -5,13 +5,20 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { DEFAULT_PROFILE, type ProfileData, type StatsEngine } from "@/lib/types";
-import { generateReadme, generateStatsWorkflow, generateCardScript, hasNativePanels } from "@/lib/generator";
+import {
+  generateReadme,
+  generateStatsWorkflow,
+  generateCardScript,
+  generateSetupDoc,
+  hasNativePanels,
+} from "@/lib/generator";
 import { SKILL_CATEGORIES } from "@/data/skills";
 import { SOCIAL_PLATFORMS } from "@/data/socials";
 import { STATS_THEMES, getTheme } from "@/data/statsThemes";
-import { STATS_PANELS, type PanelId } from "@/lib/statsCards";
-import { renderStatsCard, renderTopLangsCard } from "@/lib/cardRenderer";
+import { STATS_PANELS, resolveCards, type PanelId } from "@/lib/statsCards";
+import { renderStatsCard, renderTopLangsCard, renderPlaceholderCard } from "@/lib/cardRenderer";
 import { fetchCardData } from "@/lib/githubData";
+import { createZip, type ZipEntry } from "@/lib/zip";
 import { Doctor } from "./Doctor";
 
 type Tab = "builder" | "doctor";
@@ -63,13 +70,48 @@ export function Builder() {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const download = (filename: string, content: string) => {
-    const blob = new Blob([content], { type: "text/plain" });
+  const saveBlob = (filename: string, blob: Blob) => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = filename;
     a.click();
     URL.revokeObjectURL(a.href);
+  };
+
+  const download = (filename: string, content: string) =>
+    saveBlob(filename, new Blob([content], { type: "text/plain" }));
+
+  const [bundling, setBundling] = useState(false);
+
+  // Durable mode ships a ready-to-commit archive: correct folder layout plus
+  // pre-rendered asset SVGs, so the README works the instant it's committed —
+  // before the workflow has ever run.
+  const downloadBundle = async () => {
+    const user = profile.githubUsername.trim();
+    const entries: ZipEntry[] = [
+      { path: "README.md", content: markdown },
+      { path: "SETUP.md", content: generateSetupDoc(profile) },
+      { path: ".github/workflows/update-stats.yml", content: workflow },
+    ];
+    if (shipScript) entries.push({ path: "scripts/generate-cards.mjs", content: cardScript });
+
+    if (user && profile.addons.panels.length) {
+      setBundling(true);
+      try {
+        const colors = getTheme(profile.addons.statsTheme).colors;
+        const data = await fetchCardData(user);
+        for (const c of resolveCards(user, profile.addons.statsTheme, profile.addons.panels)) {
+          let svg: string;
+          if (c.panel.id === "stats") svg = renderStatsCard(data.stats, colors);
+          else if (c.panel.id === "topLangs") svg = renderTopLangsCard(data.langs, colors);
+          else svg = renderPlaceholderCard(c.panel.label, colors);
+          entries.push({ path: `assets/${c.panel.file}`, content: svg });
+        }
+      } finally {
+        setBundling(false);
+      }
+    }
+    saveBlob("readme-forge-profile.zip", createZip(entries));
   };
 
   return (
@@ -245,14 +287,11 @@ export function Builder() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      download("README.md", markdown);
-                      if (durable) download("update-stats.yml", workflow);
-                      if (shipScript) download("generate-cards.mjs", cardScript);
-                    }}
-                    className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500"
+                    disabled={bundling}
+                    onClick={() => (durable ? downloadBundle() : download("README.md", markdown))}
+                    className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
                   >
-                    Download
+                    {bundling ? "Bundling…" : durable ? "Download .zip" : "Download README"}
                   </button>
                 </div>
               </div>
@@ -289,24 +328,20 @@ export function Builder() {
               </div>
             </div>
             {durable ? (
-              <p className="mt-2 text-xs text-zinc-500">
-                Download gives you <code>README.md</code>, <code>update-stats.yml</code>
-                {shipScript && (
-                  <>
-                    {" "}
-                    and <code>generate-cards.mjs</code>
-                  </>
-                )}
-                . Overall-stats and Top-languages are rendered by README Forge&apos;s own script — no third-party
-                service. Put the workflow at <code>.github/workflows/</code>
-                {shipScript && (
-                  <>
-                    {" "}
-                    and the script at <code>scripts/</code>
-                  </>
-                )}
-                , run it once from the Actions tab to seed <code>./assets</code>, and it refreshes daily.
-              </p>
+              <div className="mt-2 space-y-1 text-xs text-zinc-500">
+                <p>
+                  <strong className="text-zinc-400">Don&apos;t just copy-paste this one.</strong> The stat cards use
+                  relative paths like <code>./assets/github-stats.svg</code>, so they only work once those files exist
+                  in your repo.
+                </p>
+                <p>
+                  <strong className="text-emerald-400">Download .zip</strong> gives you a ready-to-commit folder —
+                  <code>README.md</code>, the workflow{shipScript && <> and <code>generate-cards.mjs</code></>}, plus
+                  the <code>assets/</code> cards <em>already rendered</em>, so your profile works the moment you commit
+                  (before the workflow even runs). See the included <code>SETUP.md</code>. Prefer plain copy-paste?
+                  Switch to <strong>Live</strong>.
+                </p>
+              </div>
             ) : (
               <p className="mt-2 text-xs text-zinc-500">
                 Live mode hotlinks the shared services on every view — quick to set up, but they can rate-limit or

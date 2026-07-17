@@ -58,6 +58,16 @@ ${rowSvg}
 </svg>`;
 }
 
+/** Placeholder committed for third-party cards so the README shows something
+ *  tidy (not a broken image) until the workflow's first run replaces it. */
+export function renderPlaceholderCard(label: string, c: ThemeColors): string {
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${esc(label)}">
+  <rect x="0.5" y="0.5" width="${W - 1}" height="${H - 1}" rx="10" fill="${c.bg}" stroke="${c.border}"/>
+  <text x="${W / 2}" y="${H / 2 - 6}" font-size="16" font-weight="700" fill="${c.title}" text-anchor="middle" font-family="'Segoe UI',Ubuntu,sans-serif">${esc(label)}</text>
+  <text x="${W / 2}" y="${H / 2 + 18}" font-size="12" fill="${c.text}" text-anchor="middle" font-family="'Segoe UI',Ubuntu,sans-serif">Populates on the first workflow run</text>
+</svg>`;
+}
+
 export function renderTopLangsCard(langs: LangDatum[], c: ThemeColors): string {
   const top = langs.slice(0, 6);
   const barX = 30;

@@ -35,6 +35,13 @@ generates profiles that stay healthy — and diagnoses existing ones that alread
 
   The live preview shows the real cards either way (rendering the native ones from your live GitHub
   data), so you see exactly what you're getting.
+
+- **📦 Ready-to-commit bundle** — in durable mode, **Download .zip** gives you the whole thing laid out
+  correctly (`README.md`, `.github/workflows/update-stats.yml`, `scripts/generate-cards.mjs`, and an
+  `assets/` folder with the cards *already rendered*) plus a `SETUP.md`. Commit it and your profile
+  works immediately — no broken images while you wait for the first workflow run. (Copy-pasting the
+  markdown alone won't work in durable mode, because the cards use relative `./assets` paths; use Live
+  mode if you want pure copy-paste.)
 - **🩺 Link Doctor** — point it at any GitHub username. It fetches the profile README, checks every
   link and image (including soft-404s: URLs that return HTTP 200 but serve HTML where an image
   should be), explains *why* each dead link died, and suggests working replacements.
