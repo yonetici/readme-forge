@@ -25,11 +25,23 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
-/* GitHub-ish rendering for the generated README preview */
+/* Faithful GitHub README rendering. The canvas can be toggled between GitHub's
+   light and dark themes, because monochrome logos (Next.js, Rust, Express…)
+   are visible on light backgrounds but vanish on dark — so users can check how
+   their icons look under both before shipping. */
 .readme-preview {
   font-size: 0.875rem;
   line-height: 1.6;
-  color: #e4e4e7;
+  border-radius: 0.5rem;
+  padding: 1.25rem;
+}
+.readme-preview.gh-light {
+  background: #ffffff;
+  color: #1f2328;
+}
+.readme-preview.gh-dark {
+  background: #0d1117;
+  color: #e6edf3;
 }
 .readme-preview h1 {
   font-size: 1.5rem;
@@ -40,8 +52,13 @@ body {
   font-size: 1.1rem;
   font-weight: 600;
   margin: 1rem 0 0.5rem;
-  border-bottom: 1px solid #3f3f46;
   padding-bottom: 0.3rem;
+}
+.readme-preview.gh-light h3 {
+  border-bottom: 1px solid #d1d9e0;
+}
+.readme-preview.gh-dark h3 {
+  border-bottom: 1px solid #30363d;
 }
 .readme-preview p {
   margin: 0.5rem 0;
@@ -51,8 +68,11 @@ body {
   padding-left: 1.5rem;
   margin: 0.5rem 0;
 }
-.readme-preview a {
-  color: #34d399;
+.readme-preview.gh-light a {
+  color: #0969da;
+}
+.readme-preview.gh-dark a {
+  color: #4493f8;
 }
 .readme-preview img {
   display: inline-block;

@@ -20,6 +20,7 @@ type OutputTab = "preview" | "markdown" | "workflow";
 export function Builder() {
   const [tab, setTab] = useState<Tab>("builder");
   const [outputTab, setOutputTab] = useState<OutputTab>("preview");
+  const [previewTheme, setPreviewTheme] = useState<"light" | "dark">("light");
   const [profile, setProfile] = useState<ProfileData>(DEFAULT_PROFILE);
   const [copied, setCopied] = useState(false);
 
@@ -225,6 +226,16 @@ export function Builder() {
                   )}
                 </div>
                 <div className="flex gap-2">
+                  {activeTab === "preview" && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTheme((t) => (t === "light" ? "dark" : "light"))}
+                      title={`Previewing GitHub ${previewTheme} theme — click to switch`}
+                      className="rounded-md bg-zinc-800 px-3 py-1 text-xs text-zinc-200 hover:bg-zinc-700"
+                    >
+                      {previewTheme === "light" ? "☀️ Light" : "🌙 Dark"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => copy(activeTab === "workflow" ? workflow : markdown)}
@@ -247,7 +258,7 @@ export function Builder() {
               </div>
               <div className="max-h-[80vh] overflow-auto p-4">
                 {activeTab === "preview" && (
-                  <div className="readme-preview">
+                  <div className={`readme-preview gh-${previewTheme}`}>
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeRaw]}
