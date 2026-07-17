@@ -2,6 +2,8 @@ import type { ProfileData } from "./types";
 import { findSkill } from "@/data/skills";
 import { SOCIAL_PLATFORMS } from "@/data/socials";
 import { resolveCards } from "./statsCards";
+import { getTheme } from "@/data/statsThemes";
+import { LANGUAGE_COLORS } from "@/data/languageColors";
 
 export interface GenerateOptions {
   /** When true, stat cards use live URLs so the in-app preview shows real
@@ -66,10 +68,15 @@ export function generateReadme(p: ProfileData, opts: GenerateOptions = {}): stri
   if (user && p.addons.panels.length) {
     const durable = p.addons.statsEngine === "durable";
     const cards = resolveCards(user, p.addons.statsTheme, p.addons.panels);
-    // In durable mode the README points at committed files — except in the
-    // preview, where we show the live image so the user can actually see it.
-    const src = (c: (typeof cards)[number]) =>
-      durable && !opts.forPreview ? c.committedPath : c.liveUrl;
+    // Live mode hotlinks third-party cards. Durable points the README at
+    // committed files; in preview we swap third-party cards for their live URL
+    // so they're visible, but keep native cards on their ./assets path so the
+    // preview renders README Forge's own card instead of a third-party one.
+    const src = (c: (typeof cards)[number]) => {
+      if (!durable) return c.liveUrl;
+      if (c.panel.native) return c.committedPath;
+      return opts.forPreview ? c.liveUrl : c.committedPath;
+    };
 
     const rows = cards
       .map((c) => `<img src="${src(c)}" alt="${c.panel.label}" ${c.panel.fullWidth ? "" : 'height="165" '}/>`)
@@ -78,7 +85,7 @@ export function generateReadme(p: ProfileData, opts: GenerateOptions = {}): stri
 
     if (durable && !opts.forPreview) {
       out.push(
-        `<!-- Stat cards above are committed to ./assets by .github/workflows/update-stats.yml\n     (included in your README Forge download). They refresh daily and keep working\n     even when the upstream services are down. -->`
+        `<!-- Stat cards above are committed to ./assets and refreshed daily by\n     .github/workflows/update-stats.yml (included in your README Forge download).\n     The Overall-stats and Top-languages cards are rendered by README Forge's own\n     scripts/generate-cards.mjs — no third-party render service at all. -->`
       );
     }
   }
@@ -86,19 +93,58 @@ export function generateReadme(p: ProfileData, opts: GenerateOptions = {}): stri
   return out.join("\n\n") + "\n";
 }
 
+export function hasNativePanels(p: ProfileData): boolean {
+  return resolveCards(p.githubUsername.trim() || "u", p.addons.statsTheme, p.addons.panels).some(
+    (c) => c.panel.native
+  );
+}
+
 export function generateStatsWorkflow(p: ProfileData): string {
-  const user = p.githubUsername.trim() || "YOUR_USERNAME";
-  const cards = resolveCards(user, p.addons.statsTheme, p.addons.panels);
-  const fetches = cards
-    .map((c) => `          fetch "${c.liveUrl}" "assets/${c.panel.file}"`)
-    .join("\n");
+  const cards = resolveCards(p.githubUsername.trim() || "YOUR_USERNAME", p.addons.statsTheme, p.addons.panels);
+  const nativeCards = cards.filter((c) => c.panel.native);
+  const thirdParty = cards.filter((c) => !c.panel.native);
+
+  const nativeStep = nativeCards.length
+    ? `      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Render README Forge stat cards (no third-party service)
+        env:
+          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/generate-cards.mjs
+
+`
+    : "";
+
+  const fetchStep = thirdParty.length
+    ? `      - name: Fetch third-party cards
+        run: |
+          mkdir -p assets
+          fetch() {
+            tmp="$(mktemp)"
+            code="$(curl -sL --max-time 30 -w '%{http_code}' -o "$tmp" "$1")"
+            if [ "$code" = "200" ] && head -c 256 "$tmp" | grep -qiE '<svg|<\\?xml'; then
+              mv "$tmp" "$2"
+              echo "updated $2"
+            else
+              echo "skip $2 (HTTP $code) — keeping previous copy"
+              rm -f "$tmp"
+            fi
+          }
+${thirdParty.map((c) => `          fetch "${c.liveUrl}" "assets/${c.panel.file}"`).join("\n")}
+
+`
+    : "";
 
   return `name: Update profile stats
 
-# Fetches your stat cards once a day and commits them to ./assets, so your
-# README serves durable copies instead of hotlinking shared services on every
-# view. A failed fetch keeps the previous card, so your profile never breaks
-# even when the upstream service is rate-limited or down.
+# Refreshes your stat cards once a day and commits them to ./assets, so your
+# README serves durable copies instead of hotlinking services on every view.
+#  - Overall stats & Top languages are rendered by scripts/generate-cards.mjs
+#    from the GitHub API directly — no third-party render service involved.
+#  - Any other cards are fetched once/day; a failed fetch keeps the previous
+#    copy, so your profile never breaks when an upstream service is down.
 on:
   schedule:
     - cron: "0 3 * * *"
@@ -113,23 +159,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch stat cards
-        run: |
-          mkdir -p assets
-          fetch() {
-            tmp="$(mktemp)"
-            code="$(curl -sL --max-time 30 -w '%{http_code}' -o "$tmp" "$1")"
-            if [ "$code" = "200" ] && head -c 256 "$tmp" | grep -qiE '<svg|<\\?xml'; then
-              mv "$tmp" "$2"
-              echo "updated $2"
-            else
-              echo "skip $2 (HTTP $code) — keeping previous copy"
-              rm -f "$tmp"
-            fi
-          }
-${fetches}
-
-      - name: Commit refreshed cards
+${nativeStep}${fetchStep}      - name: Commit refreshed cards
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -140,6 +170,106 @@ ${fetches}
             git commit -m "chore: refresh profile stat cards"
             git push
           fi
+`;
+}
+
+/**
+ * A dependency-free Node script (committed to the user's repo) that fetches
+ * their GitHub data via the authenticated REST API and renders README Forge's
+ * own SVG cards — the whole point being zero third-party render services.
+ * The card layout mirrors src/lib/cardRenderer.ts so preview and output match.
+ */
+export function generateCardScript(p: ProfileData): string {
+  const user = p.githubUsername.trim() || "YOUR_USERNAME";
+  const c = getTheme(p.addons.statsTheme).colors;
+  const cards = resolveCards(user, p.addons.statsTheme, p.addons.panels);
+  const wantStats = cards.some((x) => x.panel.id === "stats");
+  const wantLangs = cards.some((x) => x.panel.id === "topLangs");
+
+  return `// Generated by README Forge — renders your GitHub stat cards with no
+// third-party render service. Requires Node 18+ (global fetch). Run in CI with
+// GH_TOKEN set; the included workflow does this for you.
+import { writeFileSync, mkdirSync } from "node:fs";
+
+const USER = ${JSON.stringify(user)};
+const COLORS = ${JSON.stringify(c)};
+const LANG_COLORS = ${JSON.stringify(LANGUAGE_COLORS)};
+const TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "";
+const H = { "User-Agent": "readme-forge", ...(TOKEN ? { Authorization: "Bearer " + TOKEN } : {}) };
+
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const fmt = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\\.0$/, "") + "k" : String(n));
+const W = 480, HT = 195;
+
+async function getData() {
+  const u = await (await fetch("https://api.github.com/users/" + USER, { headers: H })).json();
+  const repos = [];
+  for (let page = 1; page <= 4; page++) {
+    const b = await (await fetch("https://api.github.com/users/" + USER + "/repos?per_page=100&page=" + page, { headers: H })).json();
+    if (!Array.isArray(b) || !b.length) break;
+    repos.push(...b);
+    if (b.length < 100) break;
+  }
+  const owned = repos.filter((r) => !r.fork);
+  const stars = owned.reduce((s, r) => s + (r.stargazers_count || 0), 0);
+  const forks = owned.reduce((s, r) => s + (r.forks_count || 0), 0);
+  const tally = {};
+  for (const r of owned) if (r.language) tally[r.language] = (tally[r.language] || 0) + 1;
+  const total = Object.values(tally).reduce((a, b) => a + b, 0) || 1;
+  const langs = Object.entries(tally).sort((a, b) => b[1] - a[1]).slice(0, 6)
+    .map(([name, count]) => ({ name, percent: (count / total) * 100 }));
+  return {
+    stats: { login: u.login, name: u.name || u.login, stars, repos: u.public_repos || owned.length, followers: u.followers || 0, forks },
+    langs,
+  };
+}
+
+function statsCard(d) {
+  const title = esc((d.name || d.login) + "'s GitHub Stats");
+  const rows = [
+    ["⭐", "Total Stars Earned", d.stars],
+    ["📦", "Public Repositories", d.repos],
+    ["👥", "Followers", d.followers],
+    ["🍴", "Total Forks", d.forks],
+  ].map(([icon, label, value], i) => {
+    const y = 74 + i * 28;
+    return \`    <text x="30" y="\${y}" font-size="15" fill="\${COLORS.text}">\${icon}</text>
+    <text x="56" y="\${y}" font-size="14" fill="\${COLORS.text}">\${esc(label)}</text>
+    <text x="\${W - 30}" y="\${y}" font-size="14" font-weight="700" fill="\${COLORS.icon}" text-anchor="end">\${fmt(value)}</text>\`;
+  }).join("\\n");
+  return \`<svg width="\${W}" height="\${HT}" viewBox="0 0 \${W} \${HT}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="\${title}">
+  <rect x="0.5" y="0.5" width="\${W - 1}" height="\${HT - 1}" rx="10" fill="\${COLORS.bg}" stroke="\${COLORS.border}"/>
+  <text x="30" y="38" font-size="18" font-weight="700" fill="\${COLORS.title}" font-family="'Segoe UI',Ubuntu,sans-serif">\${title}</text>
+  <line x1="30" y1="50" x2="\${W - 30}" y2="50" stroke="\${COLORS.border}"/>
+  <g font-family="'Segoe UI',Ubuntu,sans-serif">
+\${rows}
+  </g>
+</svg>\`;
+}
+
+function langsCard(langs) {
+  const barX = 30, barW = W - 60;
+  const rows = langs.slice(0, 6).map((l, i) => {
+    const y = 74 + i * 24;
+    const w = Math.max(2, Math.round((l.percent / 100) * barW));
+    const col = LANG_COLORS[l.name] || "#858585";
+    return \`    <text x="\${barX}" y="\${y - 6}" font-size="13" fill="\${COLORS.text}" font-family="'Segoe UI',Ubuntu,sans-serif">\${esc(l.name)}</text>
+    <text x="\${W - 30}" y="\${y - 6}" font-size="12" fill="\${COLORS.text}" text-anchor="end" font-family="'Segoe UI',Ubuntu,sans-serif">\${l.percent.toFixed(1)}%</text>
+    <rect x="\${barX}" y="\${y - 2}" width="\${barW}" height="8" rx="4" fill="\${COLORS.border}"/>
+    <rect x="\${barX}" y="\${y - 2}" width="\${w}" height="8" rx="4" fill="\${col}"/>\`;
+  }).join("\\n");
+  return \`<svg width="\${W}" height="\${HT}" viewBox="0 0 \${W} \${HT}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Most Used Languages">
+  <rect x="0.5" y="0.5" width="\${W - 1}" height="\${HT - 1}" rx="10" fill="\${COLORS.bg}" stroke="\${COLORS.border}"/>
+  <text x="30" y="38" font-size="18" font-weight="700" fill="\${COLORS.title}" font-family="'Segoe UI',Ubuntu,sans-serif">Most Used Languages</text>
+  <line x1="30" y1="50" x2="\${W - 30}" y2="50" stroke="\${COLORS.border}"/>
+\${rows}
+</svg>\`;
+}
+
+const data = await getData();
+mkdirSync("assets", { recursive: true });
+${wantStats ? `writeFileSync("assets/github-stats.svg", statsCard(data.stats));\nconsole.log("wrote assets/github-stats.svg");` : ""}
+${wantLangs ? `writeFileSync("assets/top-langs.svg", langsCard(data.langs));\nconsole.log("wrote assets/top-langs.svg");` : ""}
 `;
 }
 

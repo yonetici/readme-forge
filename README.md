@@ -23,13 +23,18 @@ generates profiles that stay healthy — and diagnoses existing ones that alread
   social badges, and stats add-ons. Copy or download the result.
 - **📊 Configurable GitHub stats** — pick the panels (overall stats, top languages, streak, activity
   graph, trophies) and a theme, and choose how they're delivered:
-  - **Durable (default)** — the download includes an `update-stats.yml` workflow that fetches your
+  - **Durable (default)** — the download includes an `update-stats.yml` workflow that refreshes your
     chosen cards once a day and commits them to `./assets`. Your README serves those committed copies,
-    so it never hotlinks a shared service on the hot path. A failed fetch keeps the previous card, so
-    your profile keeps working even when the upstream service is rate-limited or down.
-  - **Live** — classic hotlinks, instant but subject to the rate limits and outages above.
+    so it never hotlinks a service on the hot path.
+    - **Overall stats** and **Top languages** are rendered by README Forge's own
+      `generate-cards.mjs` (also in the download) straight from the GitHub API — **no third-party
+      render service at all**, so they can't 503 or 402 on you.
+    - Other cards are fetched once/day; a failed fetch keeps the previous copy, so your profile never
+      breaks when an upstream service is down.
+  - **Live** — classic hotlinks, instant but subject to those rate limits and outages.
 
-  The live preview shows the real cards either way, so you see exactly what you're getting.
+  The live preview shows the real cards either way (rendering the native ones from your live GitHub
+  data), so you see exactly what you're getting.
 - **🩺 Link Doctor** — point it at any GitHub username. It fetches the profile README, checks every
   link and image (including soft-404s: URLs that return HTTP 200 but serve HTML where an image
   should be), explains *why* each dead link died, and suggests working replacements.

@@ -1,15 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { DEFAULT_PROFILE, type ProfileData, type StatsEngine } from "@/lib/types";
-import { generateReadme, generateStatsWorkflow } from "@/lib/generator";
+import { generateReadme, generateStatsWorkflow, generateCardScript, hasNativePanels } from "@/lib/generator";
 import { SKILL_CATEGORIES } from "@/data/skills";
 import { SOCIAL_PLATFORMS } from "@/data/socials";
-import { STATS_THEMES } from "@/data/statsThemes";
+import { STATS_THEMES, getTheme } from "@/data/statsThemes";
 import { STATS_PANELS, type PanelId } from "@/lib/statsCards";
+import { renderStatsCard, renderTopLangsCard } from "@/lib/cardRenderer";
+import { fetchCardData } from "@/lib/githubData";
 import { Doctor } from "./Doctor";
 
 type Tab = "builder" | "doctor";
@@ -24,7 +26,9 @@ export function Builder() {
   const markdown = useMemo(() => generateReadme(profile), [profile]);
   const previewMarkdown = useMemo(() => generateReadme(profile, { forPreview: true }), [profile]);
   const workflow = useMemo(() => generateStatsWorkflow(profile), [profile]);
+  const cardScript = useMemo(() => generateCardScript(profile), [profile]);
   const durable = profile.addons.statsEngine === "durable";
+  const shipScript = durable && hasNativePanels(profile);
   // The workflow tab only exists in durable mode; fall back if the user
   // switched engines while it was selected.
   const activeTab = outputTab === "workflow" && !durable ? "preview" : outputTab;
@@ -233,6 +237,7 @@ export function Builder() {
                     onClick={() => {
                       download("README.md", markdown);
                       if (durable) download("update-stats.yml", workflow);
+                      if (shipScript) download("generate-cards.mjs", cardScript);
                     }}
                     className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500"
                   >
@@ -248,7 +253,16 @@ export function Builder() {
                       rehypePlugins={[rehypeRaw]}
                       urlTransform={(url) => url}
                       components={{
-                        img: (props) => <PreviewImg src={props.src?.toString() ?? ""} alt={props.alt ?? ""} width={props.width} height={props.height} />,
+                        img: (props) => (
+                          <PreviewImg
+                            src={props.src?.toString() ?? ""}
+                            alt={props.alt ?? ""}
+                            width={props.width}
+                            height={props.height}
+                            user={profile.githubUsername.trim()}
+                            theme={profile.addons.statsTheme}
+                          />
+                        ),
                       }}
                     >
                       {previewMarkdown}
@@ -265,9 +279,22 @@ export function Builder() {
             </div>
             {durable ? (
               <p className="mt-2 text-xs text-zinc-500">
-                Download gives you <code>README.md</code> + <code>update-stats.yml</code>. Put the workflow at{" "}
-                <code>.github/workflows/update-stats.yml</code>, run it once from the Actions tab to seed{" "}
-                <code>./assets</code>, and your cards refresh daily. The preview shows the live cards for reference.
+                Download gives you <code>README.md</code>, <code>update-stats.yml</code>
+                {shipScript && (
+                  <>
+                    {" "}
+                    and <code>generate-cards.mjs</code>
+                  </>
+                )}
+                . Overall-stats and Top-languages are rendered by README Forge&apos;s own script — no third-party
+                service. Put the workflow at <code>.github/workflows/</code>
+                {shipScript && (
+                  <>
+                    {" "}
+                    and the script at <code>scripts/</code>
+                  </>
+                )}
+                , run it once from the Actions tab to seed <code>./assets</code>, and it refreshes daily.
               </p>
             ) : (
               <p className="mt-2 text-xs text-zinc-500">
@@ -282,8 +309,26 @@ export function Builder() {
   );
 }
 
-function PreviewImg({ src, alt, width, height }: { src: string; alt: string; width?: string | number; height?: string | number }) {
+function PreviewImg({
+  src,
+  alt,
+  width,
+  height,
+  user,
+  theme,
+}: {
+  src: string;
+  alt: string;
+  width?: string | number;
+  height?: string | number;
+  user: string;
+  theme: string;
+}) {
   const [failed, setFailed] = useState(false);
+  // Native cards point at ./assets/*.svg — render README Forge's own card from
+  // live GitHub data instead of a third-party image.
+  if (src === "./assets/github-stats.svg") return <NativeCard kind="stats" user={user} theme={theme} />;
+  if (src === "./assets/top-langs.svg") return <NativeCard kind="langs" user={user} theme={theme} />;
   if (failed) {
     // A card that won't load right now (e.g. the shared stats service is 503)
     // — show why, which is exactly the case durable mode fixes.
@@ -297,6 +342,50 @@ function PreviewImg({ src, alt, width, height }: { src: string; alt: string; wid
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img src={src} alt={alt} width={width} height={height} onError={() => setFailed(true)} />
+  );
+}
+
+function NativeCard({ kind, user, theme }: { kind: "stats" | "langs"; user: string; theme: string }) {
+  const [svg, setSvg] = useState<string | null>(null);
+  const [sample, setSample] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    if (!user) return;
+    fetchCardData(user).then((data) => {
+      if (!live) return;
+      const colors = getTheme(theme).colors;
+      setSample(data.sample);
+      setSvg(kind === "stats" ? renderStatsCard(data.stats, colors) : renderTopLangsCard(data.langs, colors));
+    });
+    return () => {
+      live = false;
+    };
+  }, [kind, user, theme]);
+
+  if (!user) {
+    return (
+      <span className="my-1 inline-block rounded-lg border border-dashed border-zinc-600 bg-zinc-900 px-3 py-4 text-center text-xs text-zinc-400">
+        Enter a GitHub username to preview your {kind === "stats" ? "stats" : "languages"} card.
+      </span>
+    );
+  }
+  if (!svg) {
+    return (
+      <span className="my-1 inline-block rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-4 text-center text-xs text-zinc-500">
+        Rendering your {kind === "stats" ? "stats" : "languages"} card…
+      </span>
+    );
+  }
+  return (
+    <span className="my-1 inline-block max-w-full align-top">
+      <span className="block max-w-[420px] [&>svg]:h-auto [&>svg]:w-full" dangerouslySetInnerHTML={{ __html: svg }} />
+      {sample && (
+        <span className="mt-0.5 block text-[10px] text-zinc-500">
+          sample numbers (GitHub API rate-limited in preview) — the workflow uses your real data
+        </span>
+      )}
+    </span>
   );
 }
 
