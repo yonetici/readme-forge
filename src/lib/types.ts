@@ -55,6 +55,8 @@ export interface LinkReport {
   ok: boolean;
   suggestion: string | null;
   reason: string | null;
+  /** Static build only: cross-origin link that can't be probed from a browser. */
+  skipped?: boolean;
 }
 
 export const DEFAULT_PROFILE: ProfileData = {

@@ -2,6 +2,8 @@
 
 **Build a GitHub profile README that doesn't rot.**
 
+**▶ Use it now: [yonetici.github.io/readme-forge](https://yonetici.github.io/readme-forge/)**
+
 Most profile READMEs slowly fall apart: stats cards hit shared rate limits (HTTP 503), icons hotlinked
 from moving repos start 404ing, and Heroku-hosted badge services died back in 2022. README Forge
 generates profiles that stay healthy — and diagnoses existing ones that already broke.
@@ -48,9 +50,14 @@ Open [http://localhost:3000](http://localhost:3000).
 
 - [ ] One-click "fix my README" — Link Doctor outputs a fully repaired README, not just suggestions
 - [ ] Icon vendoring — commit selected SVGs to an `assets/` folder for zero external requests
+- [x] Deploy to GitHub Pages
 - [ ] Theme gallery and more layout templates
 - [ ] Self-hosted SVG stat cards (serverless) as an alternative to the Actions workflow
-- [ ] Deploy to GitHub Pages / Vercel
+- [ ] Vercel deployment for the full-accuracy server-side Link Doctor
+
+> **Note on the hosted Link Doctor:** GitHub Pages is static hosting, so the hosted Doctor runs
+> in your browser — images are fully verified (they either load or they don't), plain links are
+> pattern-matched against known-dead services. Running locally enables full HTTP status checks.
 
 ## Tech stack
 

@@ -2,14 +2,9 @@
 
 import { useState } from "react";
 import type { LinkReport } from "@/lib/types";
+import { runClientDoctor, type DoctorResult } from "@/lib/clientDoctor";
 
-interface DoctorResult {
-  user: string;
-  branch: string;
-  totalLinks: number;
-  brokenCount: number;
-  reports: LinkReport[];
-}
+const IS_STATIC = process.env.NEXT_PUBLIC_STATIC_EXPORT === "1";
 
 export function Doctor() {
   const [username, setUsername] = useState("");
@@ -23,10 +18,15 @@ export function Doctor() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch(`/api/doctor?user=${encodeURIComponent(username.trim())}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      setResult(data);
+      if (IS_STATIC) {
+        // GitHub Pages build has no server API — run the in-browser checker.
+        setResult(await runClientDoctor(username.trim()));
+      } else {
+        const res = await fetch(`/api/doctor?user=${encodeURIComponent(username.trim())}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+        setResult(data);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -35,7 +35,8 @@ export function Doctor() {
   };
 
   const broken = result?.reports.filter((r) => !r.ok) ?? [];
-  const healthy = result?.reports.filter((r) => r.ok) ?? [];
+  const healthy = result?.reports.filter((r) => r.ok && !r.skipped) ?? [];
+  const skipped = result?.reports.filter((r) => r.ok && r.skipped) ?? [];
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -100,6 +101,25 @@ export function Doctor() {
                 {healthy.map((r) => (
                   <li key={r.url} className="truncate text-xs text-zinc-500">
                     <span className="text-emerald-500">✓</span> {r.url}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {skipped.length > 0 && (
+            <details className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+              <summary className="cursor-pointer text-sm text-zinc-400">
+                {skipped.length} links not verifiable from the browser (no known issues found)
+              </summary>
+              <p className="mt-2 text-xs text-zinc-500">
+                Plain links can&apos;t be status-checked cross-origin on the hosted version. Run README Forge
+                locally (<code>npm run dev</code>) for full HTTP checks — images are fully verified either way.
+              </p>
+              <ul className="mt-3 space-y-1">
+                {skipped.map((r) => (
+                  <li key={r.url} className="truncate text-xs text-zinc-500">
+                    <span className="text-zinc-600">?</span> {r.url}
                   </li>
                 ))}
               </ul>
