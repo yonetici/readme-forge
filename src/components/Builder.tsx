@@ -5,20 +5,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { DEFAULT_PROFILE, type ProfileData, type StatsEngine } from "@/lib/types";
-import {
-  generateReadme,
-  generateStatsWorkflow,
-  generateCardScript,
-  generateSetupDoc,
-  hasNativePanels,
-} from "@/lib/generator";
+import { generateReadme, generateStatsWorkflow, hasNativePanels } from "@/lib/generator";
 import { SKILL_CATEGORIES } from "@/data/skills";
 import { SOCIAL_PLATFORMS } from "@/data/socials";
 import { STATS_THEMES, getTheme } from "@/data/statsThemes";
-import { STATS_PANELS, resolveCards, type PanelId } from "@/lib/statsCards";
-import { renderStatsCard, renderTopLangsCard, renderPlaceholderCard } from "@/lib/cardRenderer";
+import { STATS_PANELS, type PanelId } from "@/lib/statsCards";
+import { renderStatsCard, renderTopLangsCard } from "@/lib/cardRenderer";
 import { fetchCardData } from "@/lib/githubData";
-import { createZip, type ZipEntry } from "@/lib/zip";
+import { createZip } from "@/lib/zip";
+import { buildProfileFiles } from "@/lib/bundle";
+import { publishToGitHub, PublishError, type PublishResult } from "@/lib/publish";
 import { Doctor } from "./Doctor";
 
 type Tab = "builder" | "doctor";
@@ -34,7 +30,6 @@ export function Builder() {
   const markdown = useMemo(() => generateReadme(profile), [profile]);
   const previewMarkdown = useMemo(() => generateReadme(profile, { forPreview: true }), [profile]);
   const workflow = useMemo(() => generateStatsWorkflow(profile), [profile]);
-  const cardScript = useMemo(() => generateCardScript(profile), [profile]);
   const durable = profile.addons.statsEngine === "durable";
   const shipScript = durable && hasNativePanels(profile);
   // The workflow tab only exists in durable mode; fall back if the user
@@ -87,31 +82,33 @@ export function Builder() {
   // pre-rendered asset SVGs, so the README works the instant it's committed —
   // before the workflow has ever run.
   const downloadBundle = async () => {
-    const user = profile.githubUsername.trim();
-    const entries: ZipEntry[] = [
-      { path: "README.md", content: markdown },
-      { path: "SETUP.md", content: generateSetupDoc(profile) },
-      { path: ".github/workflows/update-stats.yml", content: workflow },
-    ];
-    if (shipScript) entries.push({ path: "scripts/generate-cards.mjs", content: cardScript });
-
-    if (user && profile.addons.panels.length) {
-      setBundling(true);
-      try {
-        const colors = getTheme(profile.addons.statsTheme).colors;
-        const data = await fetchCardData(user);
-        for (const c of resolveCards(user, profile.addons.statsTheme, profile.addons.panels)) {
-          let svg: string;
-          if (c.panel.id === "stats") svg = renderStatsCard(data.stats, colors);
-          else if (c.panel.id === "topLangs") svg = renderTopLangsCard(data.langs, colors);
-          else svg = renderPlaceholderCard(c.panel.label, colors);
-          entries.push({ path: `assets/${c.panel.file}`, content: svg });
-        }
-      } finally {
-        setBundling(false);
-      }
+    setBundling(true);
+    try {
+      saveBlob("readme-forge-profile.zip", createZip(await buildProfileFiles(profile)));
+    } finally {
+      setBundling(false);
     }
-    saveBlob("readme-forge-profile.zip", createZip(entries));
+  };
+
+  const [showPublish, setShowPublish] = useState(false);
+  const [token, setToken] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+
+  const publish = async () => {
+    setPublishing(true);
+    setPublishError(null);
+    setPublishResult(null);
+    try {
+      const files = await buildProfileFiles(profile);
+      setPublishResult(await publishToGitHub(token.trim(), files));
+      setToken(""); // don't keep the token around after use
+    } catch (e) {
+      setPublishError(e instanceof PublishError || e instanceof Error ? e.message : "Publish failed");
+    } finally {
+      setPublishing(false);
+    }
   };
 
   return (
@@ -285,13 +282,22 @@ export function Builder() {
                   >
                     {copied ? "Copied ✓" : "Copy"}
                   </button>
+                  {durable && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPublish((s) => !s)}
+                      className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500"
+                    >
+                      🚀 Publish
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={bundling}
                     onClick={() => (durable ? downloadBundle() : download("README.md", markdown))}
-                    className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                    className="rounded-md bg-zinc-800 px-3 py-1 text-xs text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
                   >
-                    {bundling ? "Bundling…" : durable ? "Download .zip" : "Download README"}
+                    {bundling ? "Bundling…" : durable ? ".zip" : "Download"}
                   </button>
                 </div>
               </div>
@@ -335,11 +341,11 @@ export function Builder() {
                   in your repo.
                 </p>
                 <p>
-                  <strong className="text-emerald-400">Download .zip</strong> gives you a ready-to-commit folder —
-                  <code>README.md</code>, the workflow{shipScript && <> and <code>generate-cards.mjs</code></>}, plus
-                  the <code>assets/</code> cards <em>already rendered</em>, so your profile works the moment you commit
-                  (before the workflow even runs). See the included <code>SETUP.md</code>. Prefer plain copy-paste?
-                  Switch to <strong>Live</strong>.
+                  Easiest: <strong className="text-emerald-400">🚀 Publish</strong> commits everything to your profile
+                  repo in one click. Or <strong>Download .zip</strong> for a ready-to-commit folder (
+                  <code>README.md</code>, the workflow{shipScript && <> and <code>generate-cards.mjs</code></>}, plus the{" "}
+                  <code>assets/</code> cards <em>already rendered</em>) — see <code>SETUP.md</code>. Prefer plain
+                  copy-paste with nothing to manage? Switch to <strong>Live</strong>.
                 </p>
               </div>
             ) : (
@@ -348,7 +354,100 @@ export function Builder() {
                 go down. Switch to <strong>Durable</strong> to commit the cards to your repo instead.
               </p>
             )}
+
+            {durable && showPublish && (
+              <PublishPanel
+                user={profile.githubUsername.trim()}
+                token={token}
+                setToken={setToken}
+                publishing={publishing}
+                result={publishResult}
+                error={publishError}
+                onPublish={publish}
+              />
+            )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PublishPanel({
+  user,
+  token,
+  setToken,
+  publishing,
+  result,
+  error,
+  onPublish,
+}: {
+  user: string;
+  token: string;
+  setToken: (v: string) => void;
+  publishing: boolean;
+  result: PublishResult | null;
+  error: string | null;
+  onPublish: () => void;
+}) {
+  const tokenUrl =
+    "https://github.com/settings/personal-access-tokens/new?name=README%20Forge&description=Commit%20my%20profile%20README";
+  return (
+    <div className="mt-3 rounded-xl border border-emerald-800/60 bg-zinc-950 p-4">
+      <h3 className="text-sm font-semibold text-emerald-300">🚀 Publish to your profile repo</h3>
+      {!result ? (
+        <>
+          <p className="mt-1 text-xs text-zinc-400">
+            Commits your README, workflow, and rendered cards to{" "}
+            <code>{user || "your-username"}/{user || "your-username"}</code> in one commit. Your token stays in this
+            tab and is only ever sent to GitHub — README Forge has no server.
+          </p>
+          <ol className="mt-3 list-decimal space-y-1 pl-4 text-xs text-zinc-400">
+            <li>
+              <a href={tokenUrl} target="_blank" rel="noreferrer" className="text-emerald-400 underline">
+                Create a fine-grained token
+              </a>{" "}
+              → Repository access: <strong>Only select repositories → your profile repo</strong> (or “All”), Permissions
+              → <strong>Contents: Read and write</strong>. Set a short expiry.
+            </li>
+            <li>Paste it below and publish. Delete the token afterwards if you like — you can always make a new one.</li>
+          </ol>
+          <input
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="github_pat_…"
+            autoComplete="off"
+            className="mt-3 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 font-mono text-xs text-zinc-100 outline-none focus:border-emerald-500"
+          />
+          {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+          <button
+            type="button"
+            disabled={publishing || !token.trim() || !user}
+            onClick={onPublish}
+            className="mt-3 rounded-md bg-emerald-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {publishing ? "Publishing…" : "Commit to my profile repo"}
+          </button>
+          {!user && <p className="mt-2 text-xs text-amber-400">Enter your GitHub username above first.</p>}
+        </>
+      ) : (
+        <div className="mt-1 text-xs text-zinc-300">
+          <p className="text-emerald-300">
+            ✓ {result.createdRepo ? "Created your profile repo and committed" : "Committed"} your README.
+          </p>
+          <p className="mt-2 flex flex-wrap gap-3">
+            <a href={result.repoUrl} target="_blank" rel="noreferrer" className="text-emerald-400 underline">
+              View repo
+            </a>
+            <a href={result.commitUrl} target="_blank" rel="noreferrer" className="text-emerald-400 underline">
+              View commit
+            </a>
+          </p>
+          <p className="mt-2 text-zinc-500">
+            Last step: open the repo’s <strong>Actions</strong> tab and run <strong>“Update profile stats”</strong> once
+            so the cards refresh on their daily schedule.
+          </p>
         </div>
       )}
     </div>
